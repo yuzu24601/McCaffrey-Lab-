@@ -1,0 +1,118 @@
+# Load necessary libraries
+library(Seurat)
+library(biomaRt)
+library(ggplot2)
+library(tibble)
+library(dplyr)
+library(tidyr)
+
+# Connect to Ensembl using biomaRt
+mart <- useMart("ensembl")
+mart <- useDataset("hsapiens_gene_ensembl", mart = mart)
+
+# Define KEGG pathways of interest (including new pathways)
+pathway_ids <- c("hsa00380", "hsa00030", "hsa00010", "hsa00020", "hsa00360", 
+                 "hsa01040", "hsa00590", "hsa00053", "hsa00640", "hsa00410", 
+                 "hsa00520", "hsa00480", "hsa00190", "hsa00740", "hsa00100", 
+                 "hsa00531", "hsa00330") # KEGG IDs
+
+# Function to retrieve genes for KEGG pathways
+get_kegg_genes <- function(pathway_id) {
+  pathway <- keggGet(pathway_id)[[1]]
+  genes <- pathway$GENE
+  ensembl_ids <- sapply(strsplit(genes, ";"), function(x) trimws(x[1]))
+  return(ensembl_ids)
+}
+
+# Get pathway genes
+pathway_genes <- lapply(pathway_ids, get_kegg_genes)
+names(pathway_genes) <- c("Tryptophan_metabolism", "Pentose_Phosphate", "Glycolysis", 
+                          "Gluconeogenesis", "Phenylalanine_metabolism", 
+                          "Biosynthesis_of_unsaturated_fatty_acids", 
+                          "Arachidonic_acid_metabolism", "Abscorbate_and_Aldarate_metabolism", 
+                          "Propionate_metabolism", "Beta_Alanine_metabolism", 
+                          "Amino_sugar_and_Nucleotide_sugar_metabolism", 
+                          "Glutathione_metabolism", "Oxidative_phosphorylation", 
+                          "Riboflavin_metabolism", "Steroid_biosynthesis", 
+                          "Glycosaminoglycan_degradation", "Arginine_and_Proline_metabolism")
+
+# Filter pathway genes to match Seurat features
+seurat_genes <- rownames(data_merged_all)
+filtered_genes <- lapply(pathway_genes, function(genes) genes[genes %in% seurat_genes])
+
+# Add pathway scores to the Seurat object
+for (pathway in names(filtered_genes)) {
+  data_merged_all <- AddModuleScore(
+    object = data_merged_all,
+    features = list(filtered_genes[[pathway]]),
+    name = paste0(pathway, "_score")
+  )
+}
+
+
+head(data_merged_all)
+# Add hypoxia and glutamate/glutamine metabolism scores
+data_merged_all@meta.data <- data_merged_all@meta.data %>%
+  mutate(
+    Glutamate_Glutamine_score1 = Glutamate_Glutamine_score1, 
+    Hypoxia_score1 = Hypoxia_score1 # Replace with your scores
+  )
+
+# Define pathway scores for heatmap
+pathway_scores <- c(paste0(names(filtered_genes), "_score1"), "Glutamate_Glutamine_score1", "Hypoxia_score1")
+
+# Validate pathway scores
+missing_scores <- setdiff(pathway_scores, colnames(data_merged_all@meta.data))
+if (length(missing_scores) > 0) {
+  stop(paste("Missing pathway scores in metadata:", paste(missing_scores, collapse = ", ")))
+}
+
+# Heatmap function
+generate_scaled_ggheatmap_for_pathways <- function(data_merged_all, pathway_scores) {
+  # Fetch pathway scores
+  expression_data_all_clusters <- FetchData(data_merged_all, vars = pathway_scores)
+  
+  # Add cluster information
+  expression_data_all_clusters$cluster <- Idents(data_merged_all)
+  
+  # Aggregate pathway scores by cluster
+  expression_data_cluster_avg <- expression_data_all_clusters %>%
+    group_by(cluster) %>%
+    summarise(across(everything(), mean, na.rm = TRUE)) %>%
+    column_to_rownames(var = "cluster")
+  
+  # Scale the data
+  scaled_expression_data <- scale(expression_data_cluster_avg)
+  
+  # Convert scaled data to a long-format data frame
+  scaled_data_long <- as.data.frame(scaled_expression_data) %>%
+    rownames_to_column(var = "Cluster") %>%
+    pivot_longer(
+      cols = -Cluster,
+      names_to = "Pathway",
+      values_to = "Score"
+    )
+  
+  # Ensure clusters are ordered numerically
+  scaled_data_long$Cluster <- factor(scaled_data_long$Cluster, levels = sort(as.numeric(unique(scaled_data_long$Cluster))))
+  
+  # Plot heatmap
+  ggplot(scaled_data_long, aes(x = Pathway, y = Cluster, fill = Score)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient2(
+      low = "blue", high = "red", mid = "white", 
+      midpoint = 0, limit = c(min(scaled_data_long$Score), max(scaled_data_long$Score)), 
+      name = "Z-Score"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+      axis.text.y = element_text(size = 12),
+      plot.margin = margin(t = 10, r = 10, b = 10, l = 100), # Increase left margin
+      axis.title = element_blank()
+    ) +
+    ggtitle("Pathway Scores Across Clusters")
+}
+
+# Generate heatmap
+generate_scaled_ggheatmap_for_pathways(data_merged_all, pathway_scores)
