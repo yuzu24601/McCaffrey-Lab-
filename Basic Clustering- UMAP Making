@@ -1,0 +1,43 @@
+
+##Making UMAPs of granuloma data
+##I made a Seurat object called "data_merged_all", which is an amalgamation of data from 12 granulomas.Then, Harmony integration was used. 
+# Run UMAP, find neighbors, and clusters after Harmony
+data_merged_all <- data_merged_all %>%
+  RunUMAP(reduction = "harmony", dims = 1:20) %>%
+  FindNeighbors(reduction = "harmony", dims = 1:20) %>%
+  FindClusters(resolution = 0.5) %>%
+  identity()
+
+
+# Plot UMAP, grouped by clusters
+DimPlot(data_merged_all, reduction = "umap", group.by = "seurat_clusters", label = TRUE) +
+  ggtitle("UMAP of clusters after Harmony integration")
+
+
+##Making UMAPs of 4-6 week samples 
+library(Seurat)
+library(ggplot2)
+
+# UMAP for 4-6 week samples
+umap_4_6_weeks <- DimPlot(
+  data_4_6_weeks,
+  reduction = "umap",
+  group.by = "seurat_clusters",
+  label = TRUE,
+  label.size = 4
+) +
+  ggtitle("UMAP of 4-6 Week Samples")
+
+# UMAP for 9-12 week samples
+umap_9_12_weeks <- DimPlot(
+  data_9_12_weeks,
+  reduction = "umap",
+  group.by = "seurat_clusters",
+  label = TRUE,
+  label.size = 4
+) +
+  ggtitle("UMAP of 9-12 Week Samples")
+
+# Display UMAPs
+umap_4_6_weeks
+umap_9_12_weeks
