@@ -1,0 +1,80 @@
+##this is how I got the cell type scores from Seurat, and how I initially visualized them 
+# Get unique cell types from the metadata
+cell_types <- unique(rna_seurat.integrated_subset$GenericFinal)
+print(cell_types)
+
+# Initialize a list to store marker genes
+cell_type_markers <- list()
+
+# Loop through each cell type to find markers
+for (cell_type in cell_types) {
+  try({
+    markers <- FindMarkers(
+      object = rna_seurat.integrated_subset,
+      ident.1 = cell_type,
+      group.by = "GenericFinal",
+      logfc.threshold = 0.25,
+      min.pct = 0.1,
+      test.use = "wilcox"
+    )
+    
+    # Save top 50 markers for the current cell type
+    top_genes <- rownames(markers)[1:50]
+    
+    # Ensure genes are present in data_merged_all
+    top_genes <- top_genes[top_genes %in% rownames(data_merged_all)]
+    
+    # Store the valid genes for the cell type
+    cell_type_markers[[cell_type]] <- top_genes
+  }, silent = TRUE) # Prevent loop interruption from errors
+}
+
+str(cell_type_markers) # Inspect the structure of the list
+
+# Add module scores for each cell type directly to data_merged_all
+for (cell_type in names(cell_type_markers)) {
+  # Get the top markers for the current cell type
+  markers <- cell_type_markers[[cell_type]]
+  
+  # Add module score for the current cell type
+  data_merged_all <- AddModuleScore(
+    object = data_merged_all,
+    features = list(markers),         # List of top markers
+    name = paste0(cell_type, "_Score") # Name the score dynamically based on cell type
+  )
+}
+
+head(data_merged_all)
+
+
+##visualizing this
+library(pheatmap)
+
+
+# Step 1: Define the relevant gene signature score columns
+score_columns <- c("Neutrophil_Score1", "T1P_Score1", "T_Score1","Mphage_Score1","RBC_Score1","T2P_Score1",
+                    "B_Score1","Endo_Score1","Mast_Score1","pDC_Score1","Fibro_Score1","Plasma_Score1","cDC_Score1")  # Add other relevant scores here
+
+# Step 2: Aggregate scores by cluster (average across cells in each cluster)
+cluster_info <- data_merged_all$seurat_clusters
+score_by_cluster <- aggregate(data_merged_all@meta.data[, score_columns], 
+                              by = list(cluster_info), 
+                              FUN = mean)
+
+# Step 3: Set row names to the clusters and remove the group column
+rownames(score_by_cluster) <- score_by_cluster$Group.1
+score_by_cluster <- score_by_cluster[,-1]  # Remove the cluster column
+
+# Step 4: Plot the heatmap
+pheatmap(score_by_cluster,        # Scaling rows to compare the relative importance of the scores
+         clustering_distance_rows = "euclidean",  # Clustering method for rows
+         clustering_distance_cols = "euclidean",  # Clustering method for columns
+         clustering_method = "complete",  
+         scale = "column", # Clustering method
+         show_rownames = TRUE, 
+         show_colnames = TRUE, 
+         main = "Gene Signature Scores Across Clusters"
+)
+
+print(top_genes)
+
